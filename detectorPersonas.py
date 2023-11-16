@@ -2,6 +2,31 @@ import cv2
 import supervision as sv
 from ultralytics import YOLO
 import numpy as np
+import time
+import os
+from dotenv import load_dotenv
+from email.message import EmailMessage
+import ssl
+import smtplib
+
+load_dotenv()
+
+email_sender = "losshupaia@gmail.com"
+password = os.getenv("PASSWORD")
+email_receiver = "vicente.scheihing@gmail.com"
+
+subject = "Aviso cámara de seguridad!"
+body = """
+    Se ha visto a una persona sospechosa en el establecimiento. Tomar chela o precaucion, la wea que querai.
+"""
+
+em = EmailMessage()
+em["From"] = email_sender
+em["To"] = email_receiver
+em["Subject"] = subject
+em.set_content(body)
+
+context = ssl.create_default_context()
 
 ZONE_POLYGON = np.array([
     [0, 0],
@@ -12,6 +37,11 @@ ZONE_POLYGON = np.array([
 
 def count_people(detections, model):
     return sum(1 for _, confidence, class_id, _ in detections if model.model.names[class_id] == "person")
+
+def send_email():
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
+        smtp.login(email_sender, password)
+        smtp.sendmail(email_sender, email_receiver, em.as_string())
 
 def main():
     cap = cv2.VideoCapture(0)
@@ -25,7 +55,9 @@ def main():
     model = YOLO("yolov8n.pt")
 
     zone = sv.PolygonZone(polygon=ZONE_POLYGON, frame_resolution_wh=(1280, 720))
-    zone_annotaor = sv.PolygonZoneAnnotator(zone=zone, color=sv.Color.red())
+    zone_annotator = sv.PolygonZoneAnnotator(zone=zone, color=sv.Color.red())
+
+    person_count = 0
 
     while True:
         ret, frame = cap.read()
@@ -42,11 +74,22 @@ def main():
         cv2.putText(frame, f"People: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         zone.trigger(detections=detections)
-        frame = zone_annotaor.annotate(scene=frame)
+        frame = zone_annotator.annotate(scene=frame)
 
         cv2.imshow("yolov8", frame)
 
-        if (cv2.waitKey(1000) == 27):
+        if count > 0:
+            person_count += 1
+
+        if person_count >= 10:
+            print("------------------Correo enviado xd---------------")
+            print("------------------Cuenta reiniciad------------------")
+            person_count = 0
+            send_email()
+
+            
+
+        if cv2.waitKey(1000) == 27:
             break
 
     cap.release()
