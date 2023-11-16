@@ -2,6 +2,8 @@ import cv2
 import supervision as sv
 from ultralytics import YOLO
 import numpy as np
+import tkinter as tk
+from tkinter import ttk
 
 ZONE_POLYGON = np.array([
     [0, 0],
@@ -13,7 +15,7 @@ ZONE_POLYGON = np.array([
 def count_people(detections, model):
     return sum(1 for _, confidence, class_id, _ in detections if model.model.names[class_id] == "person")
 
-def main():
+def start_detection():
     cap = cv2.VideoCapture(0)
     
     box_annotator = sv.BoxAnnotator(
@@ -52,5 +54,14 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
 
-if __name__ == "__main__":
-    main()
+# Crear la ventana de tkinter
+root = tk.Tk()
+root.title("Detección de Personas")
+root.geometry("200x100")
+
+# Crear el botón
+start_button = ttk.Button(root, text="Iniciar Detección", command=start_detection)
+start_button.pack(pady=20)
+
+# Ejecutar la aplicación de tkinter
+root.mainloop()
