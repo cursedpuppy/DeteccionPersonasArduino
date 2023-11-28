@@ -13,6 +13,7 @@ from email.message import EmailMessage
 import ssl
 import smtplib
 import pyrebase
+import serial
 from firebase_admin import credentials, initialize_app, firestore
 
 cred = credentials.Certificate("securitycameraia-firebase-adminsdk-h6reg-bc82044a45.json")
@@ -64,7 +65,7 @@ class SecurityApp:
         # Iniciar el hilo para la detección
         detection_thread = Thread(target=self.run_detection, args=(email_receiver,))
         detection_thread.start()
-
+        self.arduino = serial.Serial('COM9', 9600, timeout=1)  # Ajustar el puerto COM según tu configuración
     def run_detection(self, email_receiver):
         cap = cv2.VideoCapture(0)
         box_annotator = sv.BoxAnnotator(
@@ -106,7 +107,10 @@ class SecurityApp:
             cv2.imshow("yolov8", frame)
 
             if count > 0:
+                self.arduino.write(b'H')
                 person_count += 1
+            else:
+                self.arduino.write(b'L')
 
             if person_count >= 10:
                 print("------------------Correo enviado xd---------------")
@@ -118,6 +122,10 @@ class SecurityApp:
 
             if cv2.waitKey(1000) == 27:
                 break
+
+        self.arduino.close()
+        cap.release()
+        cv2.destroyAllWindows()
 
         cap.release()
         cv2.destroyAllWindows()
