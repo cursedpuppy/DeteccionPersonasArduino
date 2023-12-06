@@ -1,10 +1,7 @@
 import tkinter as tk
-from tkinter import ttk
 from tkinter import messagebox
 from threading import Thread
 import cv2
-import supervision as sv
-from ultralytics import YOLO
 import numpy as np
 import time
 import os
@@ -13,23 +10,25 @@ from email.message import EmailMessage
 import ssl
 import smtplib
 import pyrebase
-import serial
-from firebase_admin import credentials, initialize_app, firestore
-
-cred = credentials.Certificate("securitycameraia-firebase-adminsdk-h6reg-bc82044a45.json")
-initialize_app(cred, {'storageBucket': 'securitycameraia.appspot.com'})
+from hikvisionapi import Client
+from ultralytics import YOLO
+import supervision as sv
+from firebase_admin import firestore, credentials, initialize_app
 load_dotenv()
+# Configuración de Firebase
 firebaseConfig = {
-  "apiKey": "AIzaSyB2MlSOiq4ZB0ChuTytP7B12oouO13hx-A",
-  "authDomain": "securitycameraia.firebaseapp.com",
-  "projectId": "securitycameraia",
-  "storageBucket": "securitycameraia.appspot.com",
-  "messagingSenderId": "154010826465",
-  "appId": "1:154010826465:web:bcd4f05ecc7278afd569a0",
-  "measurementId": "G-FZET9WEE3H",
-  "serviceAccount":"securitycameraia-firebase-adminsdk-h6reg-bc82044a45.json",
-  "databaseURL":"gs://securitycameraia.appspot.com"
+    "apiKey": "AIzaSyB2MlSOiq4ZB0ChuTytP7B12oouO13hx-A",
+    "authDomain": "securitycameraia.firebaseapp.com",
+    "projectId": "securitycameraia",
+    "storageBucket": "securitycameraia.appspot.com",
+    "messagingSenderId": "154010826465",
+    "appId": "1:154010826465:web:bcd4f05ecc7278afd569a0",
+    "measurementId": "G-FZET9WEE3H",
+    "serviceAccount": "securitycameraia-firebase-adminsdk-h6reg-bc82044a45.json",
+    "databaseURL": "gs://securitycameraia.appspot.com"
 }
+
+# Configuración de Firebase para el almacenamiento
 firebase = pyrebase.initialize_app(firebaseConfig)
 
 class SecurityApp:
@@ -65,8 +64,20 @@ class SecurityApp:
         # Iniciar el hilo para la detección
         detection_thread = Thread(target=self.run_detection, args=(email_receiver,))
         detection_thread.start()
-        self.arduino = serial.Serial('COM9', 9600, timeout=1)  # Ajustar el puerto COM según tu configuración
+
     def run_detection(self, email_receiver):
+        # Configuración de la cámara Hikvision
+        camera_ip = "192.168.4.46"
+        camera_username = "admin"
+        camera_password = "3d0s2094"
+
+        # Crear una instancia del cliente Hikvision
+        cam = Client(f'http://{camera_ip}', camera_username, camera_password)
+
+        # Configurar el canal de transmisión
+        channel = 1  # Ajusta el número del canal según tu configuración
+        cam.Streaming.channels[channel].mode = 0  # Modo de transmisión: 0 para video
+
         cap = cv2.VideoCapture(0)
         box_annotator = sv.BoxAnnotator(
             thickness=2,
@@ -76,63 +87,51 @@ class SecurityApp:
 
         model = YOLO("yolov8n.pt")
 
-        zone_polygon = np.array([
-            [0, 0],
-            [1280, 0],
-            [1250, 720],
-            [0, 720]
-        ])
-        zone = sv.PolygonZone(polygon=zone_polygon, frame_resolution_wh=(1280, 720))
-        zone_annotator = sv.PolygonZoneAnnotator(zone=zone, color=sv.Color.red())
-
         person_count = 0
+        max_person_count = 10  # Ajusta este valor según tus necesidades
 
         while True:
-            ret, frame = cap.read()
-            result = model(frame)[0]
-            detections = sv.Detections.from_yolov8(result)
-            labels = [
-                f"{model.model.names[class_id]} {confidence:0.2f}"
-                for _, confidence, class_id, _
-                in detections
-            ]
-            frame = box_annotator.annotate(scene=frame, detections=detections, labels=labels)
+            try:
+                # Obtener la imagen en formato JPEG de la cámara Hikvision
+                image_data = cam.Streaming.channels[channel].picture(method='get', type='opaque_data').content
 
-            count = self.count_people(detections, model)
-            cv2.putText(frame, f"People: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                # Decodificar la imagen y mostrarla
+                frame = cv2.imdecode(np.frombuffer(image_data, dtype=np.uint8), cv2.IMREAD_COLOR)
 
-            zone.trigger(detections=detections)
-            frame = zone_annotator.annotate(scene=frame)
+                result = model(frame)[0]
+                detections = sv.Detections.from_yolov8(result)
+                labels = [
+                    f"{model.model.names[class_id]} {confidence:0.2f}"
+                    for _, confidence, class_id, _
+                    in detections
+                ]
+                frame = box_annotator.annotate(scene=frame, detections=detections, labels=labels)
 
-            cv2.imshow("yolov8", frame)
+                count = self.count_people(detections, model)
+                cv2.putText(frame, f"People: {count}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-            if count > 0:
-                self.arduino.write(b'H')
-                person_count += 1
-            else:
-                self.arduino.write(b'L')
+                cv2.imshow("yolov8", frame)
 
-            if person_count >= 10:
-                print("------------------Correo enviado xd---------------")
-                print("------------------Conteo reiniciada------------------")
-                person_count = 0
-                image_url = self.upload_image_to_storage(frame)
-                self.send_email(email_receiver, image_url)
-                self.save_data_to_firestore(email_receiver, image_url)
+                if count > 0:
+                    person_count += 1
+                    if person_count >= max_person_count:
+                        print("------------------Correo enviado xd---------------")
+                        print("------------------Conteo reiniciado------------------")
+                        person_count = 0
+                        image_url = self.upload_image_to_storage(frame)
+                        self.send_email(email_receiver, image_url)
+                        self.save_data_to_firestore(email_receiver, image_url)
 
-            if cv2.waitKey(1000) == 27:
-                break
+                if cv2.waitKey(1000) == 27:
+                    break
 
-        self.arduino.close()
-        cap.release()
-        cv2.destroyAllWindows()
+            except Exception as e:
+                print(f"Error al obtener o mostrar la imagen: {e}")
 
         cap.release()
         cv2.destroyAllWindows()
 
     def upload_image_to_storage(self, frame):
-        
-        firebase = pyrebase.initialize_app(firebaseConfig)
         # Configurar el cliente de almacenamiento
         storage = firebase.storage()
 
@@ -151,7 +150,6 @@ class SecurityApp:
         os.remove(file_path)
 
         return url
-
 
     def count_people(self, detections, model):
         return sum(1 for _, confidence, class_id, _ in detections if model.model.names[class_id] == "person")
@@ -174,6 +172,10 @@ class SecurityApp:
             smtp.sendmail("losshupaia@gmail.com", email_receiver, em.as_string())
 
     def save_data_to_firestore(self, email_receiver, image_url):
+        # Configuración de Firebase para el almacenamiento
+        cred = credentials.Certificate("securitycameraia-firebase-adminsdk-h6reg-bc82044a45.json")
+        initialize_app(cred, {'storageBucket': 'securitycameraia.appspot.com'})
+
         detections_ref = firestore.client().collection('detections')
 
         detections_ref.add({
