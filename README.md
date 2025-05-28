@@ -1,3 +1,4 @@
+⚠️Por favor leer notas al final⚠️
 **Security Camera IA - Proyecto de Detección Inteligente**  
 *(Proyecto Educativo - No Comercial)*  
 
@@ -60,3 +61,5 @@ Desarrollado como proyecto de investigación académica, explora:
  
 
 *Nota: Código compartido como referencia educativa - No apto para implementación productiva*
+
+⚠️*Nota importante: Este proyecto no funciona porque las credenciales de Firebase fueron expuestas públicamente y deshabilitadas por seguridad. Usa tus propias credenciales de Firebase para probarlo localmente, ya que las claves de servicios nunca deben subirse a repositorios públicos.*⚠️
